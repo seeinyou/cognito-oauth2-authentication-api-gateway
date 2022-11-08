@@ -1,0 +1,215 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  cognito-oauth-poc - This template creates an Amazon Cognito User Pool and poc APIs.
+
+Transform:
+- AWS::Serverless-2016-10-31
+
+Parameters:
+  CognitoUserPoolName:
+    Type: String
+    Default: poc-app-test-user-pool-name
+    Description: The Cognito User Pool name for the project
+  CognitoUserPoolDomain:
+    Type: String
+    Default: poc-app-test-user-pool-domain
+    Description: The Cognito User Pool domain for the project
+  CognitoUserPoolClientName:
+    Type: String
+    Default: poc-app-test-pool-client
+  CognitoUserPoolClientName2:
+    Type: String
+    Default: poc-app-test-pool-client-server
+  CognitoUserPoolDefaultUserEmail:
+    Type: String
+    Default: admin@example.com
+  CognitoUserPoolResourceServerIdentifier:
+    Type: String
+    Default: my-api-scope
+  CognitoUserPoolResourceServerScope1:
+    Type: String
+    Default: read
+  CognitoUserPoolResourceServerScope2:
+    Type: String
+    Default: read
+
+Globals:
+  Function:
+    Tracing: Active
+  Api:
+    TracingEnabled: True
+
+Resources:
+  ## Create the API Gateway, its stage "Prod", and its Authorizer
+  MyApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors: "'*'"
+      Auth:
+        ## Use Cognito user pool authorization as the API Gateway Authorizer
+        DefaultAuthorizer: MyCognitoAuthorizer
+        Authorizers:
+          MyCognitoAuthorizer:
+            UserPoolArn: !GetAtt MyCognitoUserPool.Arn
+        ## Create a Usage Plan and API key - Usage Plan and API KEY can work with Authorizer
+        # UsagePlan:
+        #   CreateUsagePlan: SHARED
+        #   # Description: poc-textract-list-pdfs
+        #   # Quota: QuotaSettings
+        #   # Tags: List
+        #   Throttle:
+        #     BurstLimit: 50
+        #     RateLimit: 10
+        #   # UsagePlanName: String
+        # ApiKeyRequired: true # sets for all methods
+
+  ## A public HTML callback page to display OAuth information
+  ## Uncommented if needed
+  # PublicCallbackFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     CodeUri: ./src/
+  #     Handler: callback.handler
+  #     Runtime: nodejs16.x
+  #     FunctionUrlConfig:
+  #       AuthType: NONE
+
+  ## Test API function 1 - Project index
+  MyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src/
+      Handler: oauth_test.handler
+      Runtime: nodejs16.x
+      Events:
+        Root:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /
+            Method: GET
+            Auth:
+              AuthorizationScopes:
+                - Fn::Sub:
+                  - '${scopeId}/${scopeName}'
+                  - scopeId: !Ref MyCognitoUserPoolResourceServer
+                  - scopeName: !Ref CognitoUserPoolResourceServerScope1
+            #   ApiKeyRequired: true
+
+  ## Test API function2
+  MyFunction2:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src/
+      Handler: oauth_test_1.handler
+      Runtime: nodejs16.x
+      Events:
+        Root:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /doc/show
+            Method: GET
+            Auth:
+              AuthorizationScopes:
+                - Fn::Sub:
+                  - '${scopeId}/read'
+                  - scopeId: !Ref MyCognitoUserPoolResourceServer
+            #   ApiKeyRequired: true
+
+  ## Amazon Cognito User Pool
+  MyCognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Ref CognitoUserPoolName
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: True
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+      UsernameAttributes:
+        - email
+      Schema:
+        - AttributeDataType: String
+          Name: email
+          Required: false
+  
+  ## Amazon Cognito User Pool Domain - an endpoint for authentication
+  MyCognitoUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref CognitoUserPoolDomain
+      UserPoolId: !Ref MyCognitoUserPool
+
+  ## Amazon Cognito User Pool default user
+  MyCognitoUserPoolDefaultUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties: 
+      Username: !Ref CognitoUserPoolDefaultUserEmail
+      UserPoolId: !Ref MyCognitoUserPool
+
+  ## Amazon Cognito User Pool Resource Server - define custom scopes here
+  ## It is required for OAuth client_credentials flow
+  # MyCognitoUserPoolResourceServer:
+  #   Type: AWS::Cognito::UserPoolResourceServer
+  #   Properties:
+  #     UserPoolId: !Ref MyCognitoUserPool
+  #     Identifier: !Ref CognitoUserPoolResourceServerIdentifier
+  #     Name: api-gateway
+  #     Scopes: 
+  #       - ScopeDescription: "read"
+  #         ScopeName: "read"
+  #       - ScopeDescription: "write"
+  #         ScopeName: "write"
+
+  ## Amazon Cognito User Pool client for Implicit flow
+  MyCognitoUserPoolClient:
+    # DependsOn: PublicCallbackFunction
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref MyCognitoUserPool
+      ClientName: !Ref CognitoUserPoolClientName
+      SupportedIdentityProviders:
+        - COGNITO
+      GenerateSecret: true # it must be true when AllowedOAuthFlows is set to client_credentials
+      CallbackURLs:
+        - https://www.example.com/callback
+        # - !GetAtt PublicCallbackFunctionUrl.FunctionUrl # Use the public callback page, created above.
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - implicit
+      AllowedOAuthScopes:
+        - email
+        - openid # openid is required for email
+        - aws.cognito.signin.user.admin
+        - profile
+        ## Add custom scopes below if needed
+
+  ## Amazon Cognito User Pool client for client_credentials flow
+  ## Use it for OAuth client_credentials flow
+  # MyCognitoUserPoolClient2:
+  #   # DependsOn: PublicCallbackFunction
+  #   Type: AWS::Cognito::UserPoolClient
+  #   Properties:
+  #     UserPoolId: !Ref MyCognitoUserPool
+  #     ClientName: !Ref CognitoUserPoolClientName2
+  #     SupportedIdentityProviders:
+  #       - COGNITO
+  #     GenerateSecret: true # it must be true when AllowedOAuthFlows is set to client_credentials
+  #     CallbackURLs:
+  #       - https://www.example.com/callback
+  #       # - !GetAtt PublicCallbackFunctionUrl.FunctionUrl
+  #     AllowedOAuthFlowsUserPoolClient: true
+  #     AllowedOAuthFlows:
+  #       - client_credentials
+  #     AllowedOAuthScopes: # Only Custom Scopes are allowed for client_credentials
+  #       - Fn::Sub:
+  #         - '${scopeId}/${scopeName}'
+  #         - scopeId: !Ref MyCognitoUserPoolResourceServer
+  #         # - scopeName: !Ref CognitoUserPoolResourceServerScope1
+  #       - Fn::Sub:
+  #         - '${scopeId}/${scopeName}'
+  #         - scopeId: !Ref MyCognitoUserPoolResourceServer
+  #         - scopeName: !Ref CognitoUserPoolResourceServerScope2
+
