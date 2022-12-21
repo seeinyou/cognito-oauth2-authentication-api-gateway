@@ -21,15 +21,16 @@ API Gateway handles all the tasks involved in accepting and processing up to hun
 
 
 ## File structure
-`
--- /
- |
- |-- template.yaml
- |-- src
-   |
-   |-- callback.js
-   |-- oauth_test.js
-`
+```
+---- /
+    |
+    |-- template.yaml
+    |-- src
+        |
+        |-- oauth_test.js
+        |-- oauth_test_1.js
+```
+
 ### CloudFormation template
 #### template.yaml
 
@@ -47,9 +48,12 @@ The CloudFormation template.yaml creates resources below:
 You can modify the template.yaml to use different OAuth 2.0 grant flows such as Authorization code grant or Client credentials grant.
 
 ### Lambda functions
+
 #### src/
 oauth_test.js
+
 oauth_test_1.js
+
 
 ## Deployment
 
